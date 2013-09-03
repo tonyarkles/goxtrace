@@ -11,26 +11,26 @@ func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	scanner := bufio.NewScanner(conn)
 	cutset := " "
-	for {
-		for scanner.Scan() {
-			text := scanner.Text()
-			chunks := strings.SplitN(text, ":", 2)
-			Log("Chunks:", len(chunks))
-			if len(chunks) == 2 {
-				key := strings.Trim(chunks[0], cutset)
-				value := strings.Trim(chunks[1], cutset)
-				Log("Key:", key, "Value:", value)
-			} else if text == "" {
-				Log("Completed record")
-			} else {
-				Log("Unparseable input:", text)
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			Log("Error reading from socket:", err)
+	currentRecord := make(map[string]string)
+	for scanner.Scan() {
+		text := scanner.Text()
+		chunks := strings.SplitN(text, ":", 2)
+		Log("Chunks:", len(chunks))
+		if len(chunks) == 2 {
+			key := strings.Trim(chunks[0], cutset)
+			value := strings.Trim(chunks[1], cutset)
+			currentRecord[key] = value
+			Log("Key:", key, "Value:", value)
+		} else if text == "" {
+			Log("Completed record:", currentRecord)
+			currentRecord = make(map[string]string)
+		} else {
+			Log("Unparseable input:", text)
 		}
 	}
-	conn.Write([]byte("Hello world!\n"))
+	if err := scanner.Err(); err != nil {
+		Log("Error reading from socket:", err)
+	}
 }
 
 func Log(v ...interface{}) {
