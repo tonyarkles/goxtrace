@@ -9,11 +9,16 @@ import (
 	"strings"
 )
 
-func handleXTraceConnection(conn net.Conn) {
+type GoxEngine struct {
+	Quit chan bool
+	Db   *GoxDb
+}
+
+func handleXTraceConnection(conn net.Conn, engine *GoxEngine) {
 	defer conn.Close()
 	scanner := bufio.NewScanner(conn)
 	cutset := " "
-	currentRecord := make(map[string]string)
+	currentRecord := make(map[string]interface{})
 	for scanner.Scan() {
 		text := scanner.Text()
 		chunks := strings.SplitN(text, ":", 2)
@@ -24,8 +29,14 @@ func handleXTraceConnection(conn net.Conn) {
 			currentRecord[key] = value
 			Log("Key:", key, "Value:", value)
 		} else if text == "" {
-			Log("Completed record:", currentRecord)
-			currentRecord = make(map[string]string)
+			record := NewGoxtraceRecord(currentRecord)
+			if record != nil {
+				engine.Db.Write(record)
+				Log("Completed record:", record)
+			} else {
+				Log("Missing X-Trace in record:", currentRecord)
+			}
+			currentRecord = make(map[string]interface{})
 		} else {
 			Log("Unparseable input:", text)
 		}
@@ -35,7 +46,7 @@ func handleXTraceConnection(conn net.Conn) {
 	}
 }
 
-func handleJsonConnection(conn net.Conn) {
+func handleJsonConnection(conn net.Conn, engine *GoxEngine) {
 	defer conn.Close()
 	dec := json.NewDecoder(conn)
 	for {
@@ -46,7 +57,13 @@ func handleJsonConnection(conn net.Conn) {
 			Log("Error reading from connection:", err)
 			break
 		}
-		Log("Completed record:", currentRecord)
+		record := NewGoxtraceRecord(currentRecord)
+		if record != nil {
+			engine.Db.Write(record)
+			Log("Completed record:", record)
+		} else {
+			Log("Missing X-Trace in record:", currentRecord)
+		}
 	}
 }
 
@@ -54,9 +71,9 @@ func Log(v ...interface{}) {
 	fmt.Println(v...)
 }
 
-type server func(net.Conn)
+type server func(net.Conn, *GoxEngine)
 
-func runServer(binding string, listener server, quit chan bool) {
+func runServer(binding string, listener server, engine *GoxEngine) {
 	ln, err := net.Listen("tcp", binding)
 	if err != nil {
 		Log("Listen error")
@@ -70,15 +87,15 @@ func runServer(binding string, listener server, quit chan bool) {
 				Log("Error from Accept():", err)
 				continue
 			}
-			go listener(conn)
+			go listener(conn, engine)
 		}
-		quit <- true
+		engine.Quit <- true
 	}()
 }
 
 func main() {
-	quit := make(chan bool)
-	runServer(":4444", handleXTraceConnection, quit)
-	runServer(":4445", handleJsonConnection, quit)
-	<-quit
+	engine := &GoxEngine{Quit: make(chan bool), Db: NewGoxDb("data.db3")}
+	runServer(":4444", handleXTraceConnection, engine)
+	runServer(":4445", handleJsonConnection, engine)
+	<-engine.Quit
 }
