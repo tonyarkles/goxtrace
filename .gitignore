@@ -22,3 +22,4 @@ _testmain.go
 *.exe
 
 *.db3
+*.db3-journal
